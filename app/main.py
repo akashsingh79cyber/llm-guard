@@ -1,10 +1,13 @@
+import json
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
+from app.modules import dlp
 
-app = FastAPI(title="LLM-Guard", version="0.2")
+app = FastAPI(title="LLM-Guard", version="0.3")
 
 
 def upstream_headers():
@@ -19,9 +22,17 @@ def health():
     return {"status": "ok", "service": "LLM-Guard"}
 
 
+@app.post("/dlp/test")
+async def dlp_test(request: Request):
+    """Demo ke liye: text bhejo, masked version dekho."""
+    body = await request.json()
+    mapping = {}
+    masked = dlp.mask_text(body.get("text", ""), mapping)
+    return {"masked": masked, "found": list(mapping.keys())}
+
+
 @app.post("/v1/chat/completions")
 async def chat(request: Request):
-    # 1. Request padho
     try:
         body = await request.json()
     except Exception:
@@ -30,16 +41,27 @@ async def chat(request: Request):
     if "messages" not in body:
         return JSONResponse(status_code=400, content={"error": "'messages' field required"})
 
-    # (Aage yahan DLP, rules, scanner lagenge)
+    # DLP: LLM tak jaane se pehle sensitive data mask karo
+    body["messages"], mapping = dlp.mask_messages(body["messages"])
+    if mapping:
+        print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")
+        print(f"[DLP] Prompt sent to LLM: {body['messages'][-1]['content']}")
 
-    # 2. Streaming ya normal
     if body.get("stream"):
         return stream_response(body)
 
     try:
         async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
             r = await client.post(config.LLM_API_URL, json=body, headers=upstream_headers())
-        return JSONResponse(status_code=r.status_code, content=r.json())
+        data = r.json()
+        # Return trip: placeholder ko wapas asli value banao
+        if mapping:
+            data = json.loads(dlp.unmask_text(json.dumps(data), mapping))
+        return JSONResponse(
+            status_code=r.status_code,
+            content=data,
+            headers={"X-LLM-Guard-Masked": str(len(mapping))},
+        )
     except httpx.TimeoutException:
         return JSONResponse(status_code=504, content={"error": "LLM timeout"})
     except httpx.RequestError:
