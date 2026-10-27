@@ -27,3 +27,4 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Rules Engine (length limit, keyword block)
 - [x] Safe system instructions
 - [ ] Jailbreak classifier, Output Validator, RBAC, Dashboard
+- [x] Jailbreak dataset (collect + clean)
