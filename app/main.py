@@ -5,9 +5,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
-from app.modules import dlp
+from app.modules import dlp, rules
 
-app = FastAPI(title="LLM-Guard", version="0.3")
+app = FastAPI(title="LLM-Guard", version="0.4")
 
 
 def upstream_headers():
@@ -24,11 +24,19 @@ def health():
 
 @app.post("/dlp/test")
 async def dlp_test(request: Request):
-    """Demo ke liye: text bhejo, masked version dekho."""
+    """Demo: text bhejo, masked version dekho."""
     body = await request.json()
     mapping = {}
     masked = dlp.mask_text(body.get("text", ""), mapping)
     return {"masked": masked, "found": list(mapping.keys())}
+
+
+@app.post("/rules/preview")
+async def rules_preview(request: Request):
+    """Demo: dikhata hai ki LLM ko final kya jayega."""
+    body = await request.json()
+    msgs = rules.enforce_system_prompt(body.get("messages", []))
+    return {"messages_sent_to_llm": msgs}
 
 
 @app.post("/v1/chat/completions")
@@ -41,7 +49,20 @@ async def chat(request: Request):
     if "messages" not in body:
         return JSONResponse(status_code=400, content={"error": "'messages' field required"})
 
-    # DLP: LLM tak jaane se pehle sensitive data mask karo
+    # 1. Rules Engine: rule toote to block
+    violation = rules.check_prompt(body["messages"])
+    if violation:
+        print(f"[RULES] BLOCKED -> {violation['rule']}: {violation['reason']}")
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Blocked by LLM-Guard", **violation},
+            headers={"X-LLM-Guard-Blocked": violation["rule"]},
+        )
+
+    # 2. Safe system instruction enforce karo
+    body["messages"] = rules.enforce_system_prompt(body["messages"])
+
+    # 3. DLP: sensitive data mask karo
     body["messages"], mapping = dlp.mask_messages(body["messages"])
     if mapping:
         print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")
@@ -54,7 +75,6 @@ async def chat(request: Request):
         async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
             r = await client.post(config.LLM_API_URL, json=body, headers=upstream_headers())
         data = r.json()
-        # Return trip: placeholder ko wapas asli value banao
         if mapping:
             data = json.loads(dlp.unmask_text(json.dumps(data), mapping))
         return JSONResponse(

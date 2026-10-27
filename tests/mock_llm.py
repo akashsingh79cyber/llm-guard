@@ -12,7 +12,7 @@ app = FastAPI(title="Mock LLM")
 async def chat(request: Request):
     body = await request.json()
     user_msg = body["messages"][-1]["content"]
-    reply = f"Mock LLM reply: tumne bola '{user_msg}'"
+    reply = f"Mock LLM reply: you said '{user_msg}'"
 
     if body.get("stream"):
         async def generate():
