@@ -28,3 +28,5 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Safe system instructions
 - [ ] Jailbreak classifier, Output Validator, RBAC, Dashboard
 - [x] Jailbreak dataset (collect + clean)
+- [x] Baseline classifier (TF-IDF + LogReg)
+- [x] Better classifier (word + char n-gram SVM) + model comparison
