@@ -1,13 +1,23 @@
 import json
+import time
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
-from app.modules import dlp, rules
+from app.modules import dlp, rules, scanner
 
-app = FastAPI(title="LLM-Guard", version="0.4")
+
+@asynccontextmanager
+async def lifespan(app):
+    scanner.load_model()
+    print(f"[SCANNER] Model loaded, threshold = {scanner.load_threshold()}")
+    yield
+
+
+app = FastAPI(title="LLM-Guard", version="0.5", lifespan=lifespan)
 
 
 def upstream_headers():
@@ -24,7 +34,6 @@ def health():
 
 @app.post("/dlp/test")
 async def dlp_test(request: Request):
-    """Demo: text bhejo, masked version dekho."""
     body = await request.json()
     mapping = {}
     masked = dlp.mask_text(body.get("text", ""), mapping)
@@ -33,10 +42,30 @@ async def dlp_test(request: Request):
 
 @app.post("/rules/preview")
 async def rules_preview(request: Request):
-    """Demo: dikhata hai ki LLM ko final kya jayega."""
     body = await request.json()
     msgs = rules.enforce_system_prompt(body.get("messages", []))
     return {"messages_sent_to_llm": msgs}
+
+
+@app.post("/scan/test")
+async def scan_test(request: Request):
+    body = await request.json()
+    is_attack, prob = scanner.scan(body.get("text", ""))
+    return {
+        "is_attack": is_attack,
+        "score": round(prob, 3),
+        "threshold": scanner.load_threshold(),
+    }
+
+
+def blocked(rule, reason, score=None):
+    print(f"[BLOCKED] {rule}: {reason}")
+    content = {"error": "Blocked by LLM-Guard", "rule": rule, "reason": reason}
+    if score is not None:
+        content["score"] = round(score, 3)
+    return JSONResponse(
+        status_code=403, content=content, headers={"X-LLM-Guard-Blocked": rule}
+    )
 
 
 @app.post("/v1/chat/completions")
@@ -49,20 +78,27 @@ async def chat(request: Request):
     if "messages" not in body:
         return JSONResponse(status_code=400, content={"error": "'messages' field required"})
 
-    # 1. Rules Engine: rule toote to block
+    # 1. Rules Engine
     violation = rules.check_prompt(body["messages"])
     if violation:
-        print(f"[RULES] BLOCKED -> {violation['rule']}: {violation['reason']}")
-        return JSONResponse(
-            status_code=403,
-            content={"error": "Blocked by LLM-Guard", **violation},
-            headers={"X-LLM-Guard-Blocked": violation["rule"]},
+        return blocked(violation["rule"], violation["reason"])
+
+    # 2. ML Classifier
+    t0 = time.perf_counter()
+    is_attack, score = scanner.scan(rules.user_text(body["messages"]))
+    scan_ms = (time.perf_counter() - t0) * 1000
+    print(f"[SCANNER] score={score:.2f} attack={is_attack} time={scan_ms:.1f}ms")
+    if is_attack:
+        return blocked(
+            "ML_CLASSIFIER",
+            f"Prompt injection / jailbreak detected (score {score:.2f})",
+            score,
         )
 
-    # 2. Safe system instruction enforce karo
+    # 3. Safe system instruction
     body["messages"] = rules.enforce_system_prompt(body["messages"])
 
-    # 3. DLP: sensitive data mask karo
+    # 4. DLP
     body["messages"], mapping = dlp.mask_messages(body["messages"])
     if mapping:
         print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")

@@ -31,3 +31,4 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Baseline classifier (TF-IDF + LogReg)
 - [x] Better classifier (word + char n-gram SVM) + model comparison
 - [x] Threshold tuning + evaluation report
+- [x] ML classifier integrated in proxy (live jailbreak block)
