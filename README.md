@@ -20,9 +20,9 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 
 ## Status
 - ## Status
-- [x] Day 1: Project setup, proxy skeleton
-- [x] Day 2: Reverse proxy forwarding
-- [x] Day 3: Streaming + error handling
+- [x] Project setup, proxy skeleton
+- [x] Reverse proxy forwarding
+- [x] Streaming + error handling
 - [x] DLP engine (mask/unmask)
 - [x] Rules Engine (length limit, keyword block)
 - [x] Safe system instructions
@@ -32,3 +32,5 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Better classifier (word + char n-gram SVM) + model comparison
 - [x] Threshold tuning + evaluation report
 - [x] ML classifier integrated in proxy (live jailbreak block)
+- [x] Telemetry logging (JSON, SIEM format)
+- [x] Output validation (PII/secret leak redaction)

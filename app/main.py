@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
-from app.modules import dlp, rules, scanner
+from app.modules import dlp, output_validator, rules, scanner
+from app.modules.logger import log_event
 
 
 @asynccontextmanager
@@ -17,7 +18,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="LLM-Guard", version="0.5", lifespan=lifespan)
+app = FastAPI(title="LLM-Guard", version="0.6", lifespan=lifespan)
 
 
 def upstream_headers():
@@ -58,8 +59,9 @@ async def scan_test(request: Request):
     }
 
 
-def blocked(rule, reason, score=None):
+def blocked(rule, reason, user_id, prompt, score=None):
     print(f"[BLOCKED] {rule}: {reason}")
+    log_event("BLOCKED", user_id, rule, reason, score, prompt)
     content = {"error": "Blocked by LLM-Guard", "rule": rule, "reason": reason}
     if score is not None:
         content["score"] = round(score, 3)
@@ -78,20 +80,25 @@ async def chat(request: Request):
     if "messages" not in body:
         return JSONResponse(status_code=400, content={"error": "'messages' field required"})
 
+    user_id = request.headers.get("X-User-ID", "anonymous")
+    prompt = rules.user_text(body["messages"])
+
     # 1. Rules Engine
     violation = rules.check_prompt(body["messages"])
     if violation:
-        return blocked(violation["rule"], violation["reason"])
+        return blocked(violation["rule"], violation["reason"], user_id, prompt)
 
     # 2. ML Classifier
     t0 = time.perf_counter()
-    is_attack, score = scanner.scan(rules.user_text(body["messages"]))
+    is_attack, score = scanner.scan(prompt)
     scan_ms = (time.perf_counter() - t0) * 1000
     print(f"[SCANNER] score={score:.2f} attack={is_attack} time={scan_ms:.1f}ms")
     if is_attack:
         return blocked(
             "ML_CLASSIFIER",
             f"Prompt injection / jailbreak detected (score {score:.2f})",
+            user_id,
+            prompt,
             score,
         )
 
@@ -103,16 +110,30 @@ async def chat(request: Request):
     if mapping:
         print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")
         print(f"[DLP] Prompt sent to LLM: {body['messages'][-1]['content']}")
+        log_event("DLP_MASKED", user_id, "DLP", f"Masked {list(mapping.keys())}", None, prompt)
 
     if body.get("stream"):
+        log_event("ALLOWED", user_id, None, "stream", score, prompt)
         return stream_response(body)
 
     try:
         async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
             r = await client.post(config.LLM_API_URL, json=body, headers=upstream_headers())
         data = r.json()
+
+        # 5. Output validation (unmask se PEHLE)
+        if r.status_code == 200:
+            sys_inst = rules.load_rules()["system_instruction"]
+            data, findings = output_validator.validate_response(data, sys_inst)
+            if findings:
+                print(f"[OUTPUT] Redacted/blocked in response: {findings}")
+                log_event("OUTPUT_REDACTED", user_id, "OUTPUT_VALIDATOR", str(findings), None, prompt)
+
+        # 6. Unmask: user ka apna data wapas
         if mapping:
             data = json.loads(dlp.unmask_text(json.dumps(data), mapping))
+
+        log_event("ALLOWED", user_id, None, None, score, prompt)
         return JSONResponse(
             status_code=r.status_code,
             content=data,

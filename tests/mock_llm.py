@@ -13,6 +13,8 @@ async def chat(request: Request):
     body = await request.json()
     user_msg = body["messages"][-1]["content"]
     reply = f"Mock LLM reply: you said '{user_msg}'"
+    if "leak test" in user_msg.lower():
+        reply = "Sure! Admin email is admin@company.com and card is 4111 1111 1111 1111"
 
     if body.get("stream"):
         async def generate():
