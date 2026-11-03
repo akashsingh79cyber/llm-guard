@@ -26,7 +26,7 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] DLP engine (mask/unmask)
 - [x] Rules Engine (length limit, keyword block)
 - [x] Safe system instructions
-- [ ] Jailbreak classifier, Output Validator, RBAC, Dashboard
+- [x] Jailbreak classifier, Output Validator, RBAC, Dashboard
 - [x] Jailbreak dataset (collect + clean)
 - [x] Baseline classifier (TF-IDF + LogReg)
 - [x] Better classifier (word + char n-gram SVM) + model comparison
@@ -34,3 +34,5 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] ML classifier integrated in proxy (live jailbreak block)
 - [x] Telemetry logging (JSON, SIEM format)
 - [x] Output validation (PII/secret leak redaction)
+- [x] Model retrain + obfuscation normalization (red team tuning)
+- [x] Toxic content output filter

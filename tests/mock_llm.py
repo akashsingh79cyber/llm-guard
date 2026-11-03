@@ -15,6 +15,8 @@ async def chat(request: Request):
     reply = f"Mock LLM reply: you said '{user_msg}'"
     if "leak test" in user_msg.lower():
         reply = "Sure! Admin email is admin@company.com and card is 4111 1111 1111 1111"
+    if "toxic test" in user_msg.lower():
+        reply = "You are a stupid idiot and I hate you"
 
     if body.get("stream"):
         async def generate():
