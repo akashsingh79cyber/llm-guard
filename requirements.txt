@@ -34,6 +34,7 @@ propcache==0.5.4
 pyarrow==26.0.0
 pydantic==2.14.1
 pydantic_core==2.50.1
+PyJWT==2.15.1
 python-dateutil==3.0.0
 python-dotenv==1.2.4
 PyYAML==6.0.3

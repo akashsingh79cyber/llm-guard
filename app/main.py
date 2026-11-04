@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
-from app.modules import dlp, output_validator, rules, scanner
+from app.modules import auth, dlp, output_validator, rules, scanner
 from app.modules.logger import log_event
 
 
@@ -18,7 +18,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="LLM-Guard", version="0.6", lifespan=lifespan)
+app = FastAPI(title="LLM-Guard", version="0.7", lifespan=lifespan)
 
 
 def upstream_headers():
@@ -29,8 +29,23 @@ def upstream_headers():
 
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok", "service": "LLM-Guard"}
+
+
+@app.post("/auth/login")
+async def auth_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "JSON body required"})
+    username = body.get("username", "")
+    token = auth.login(username, body.get("password", ""))
+    if not token:
+        log_event("LOGIN_FAILED", username or "?", "AUTH", "Invalid credentials")
+        return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
+    log_event("LOGIN_OK", username, "AUTH", "Login success")
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @app.post("/dlp/test")
@@ -72,6 +87,19 @@ def blocked(rule, reason, user_id, prompt, score=None):
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    identity = None
+    if auth_header.startswith("Bearer "):
+        identity = auth.verify(auth_header[7:])
+    if identity is None:
+        log_event("AUTH_FAILED", "unknown", "AUTH", "Missing or invalid token")
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Login required. Get a token from /auth/login"},
+        )
+    user_id = identity["user"]
+    role = identity["role"]
+
     try:
         body = await request.json()
     except Exception:
@@ -80,19 +108,16 @@ async def chat(request: Request):
     if "messages" not in body:
         return JSONResponse(status_code=400, content={"error": "'messages' field required"})
 
-    user_id = request.headers.get("X-User-ID", "anonymous")
     prompt = rules.user_text(body["messages"])
 
-    # 1. Rules Engine
     violation = rules.check_prompt(body["messages"])
     if violation:
         return blocked(violation["rule"], violation["reason"], user_id, prompt)
 
-    # 2. ML Classifier
     t0 = time.perf_counter()
     is_attack, score = scanner.scan(prompt)
     scan_ms = (time.perf_counter() - t0) * 1000
-    print(f"[SCANNER] score={score:.2f} attack={is_attack} time={scan_ms:.1f}ms")
+    print(f"[SCANNER] user={user_id} role={role} score={score:.2f} attack={is_attack} time={scan_ms:.1f}ms")
     if is_attack:
         return blocked(
             "ML_CLASSIFIER",
@@ -102,10 +127,8 @@ async def chat(request: Request):
             score,
         )
 
-    # 3. Safe system instruction
     body["messages"] = rules.enforce_system_prompt(body["messages"])
 
-    # 4. DLP
     body["messages"], mapping = dlp.mask_messages(body["messages"])
     if mapping:
         print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")
@@ -121,7 +144,6 @@ async def chat(request: Request):
             r = await client.post(config.LLM_API_URL, json=body, headers=upstream_headers())
         data = r.json()
 
-        # 5. Output validation (unmask se PEHLE)
         if r.status_code == 200:
             sys_inst = rules.load_rules()["system_instruction"]
             data, findings = output_validator.validate_response(data, sys_inst)
@@ -129,7 +151,6 @@ async def chat(request: Request):
                 print(f"[OUTPUT] Redacted/blocked in response: {findings}")
                 log_event("OUTPUT_REDACTED", user_id, "OUTPUT_VALIDATOR", str(findings), None, prompt)
 
-        # 6. Unmask: user ka apna data wapas
         if mapping:
             data = json.loads(dlp.unmask_text(json.dumps(data), mapping))
 

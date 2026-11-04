@@ -7,7 +7,8 @@ from pathlib import Path
 
 import httpx
 
-URL = "http://127.0.0.1:8000/v1/chat/completions"
+BASE = "http://127.0.0.1:8000"
+URL = BASE + "/v1/chat/completions"
 random.seed(7)
 
 goals = [
@@ -138,21 +139,31 @@ print("Target:", URL)
 
 results = []
 with httpx.Client(timeout=30) as client:
+    login = client.post(
+        BASE + "/auth/login",
+        json={"username": "akash", "password": "employee123"},
+    )
+    if login.status_code != 200:
+        print("LOGIN FAILED:", login.status_code, login.text)
+        raise SystemExit(1)
+    tok = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {tok}"}
+
     for kind, cat, text in tests:
         t0 = time.perf_counter()
         try:
             r = client.post(
                 URL,
-                headers={"X-User-ID": "redteam"},
+                headers=headers,
                 json={"model": "mock", "messages": [{"role": "user", "content": text}]},
             )
-            ms = (time.perf_counter() - t0) * 1000
-            blocked = r.status_code == 403
-            rule = r.json().get("rule", "") if blocked else ""
-            results.append((kind, cat, text, blocked, rule, ms, r.status_code))
         except Exception as e:
             print("ERROR:", type(e).__name__, "- servers chal rahe hain?")
             raise SystemExit(1)
+        ms = (time.perf_counter() - t0) * 1000
+        blocked = r.status_code == 403
+        rule = r.json().get("rule", "") if blocked else ""
+        results.append((kind, cat, text, blocked, rule, ms, r.status_code))
 
 atk = [r for r in results if r[0] == "attack"]
 sf = [r for r in results if r[0] == "safe"]

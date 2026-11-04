@@ -36,3 +36,4 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Output validation (PII/secret leak redaction)
 - [x] Model retrain + obfuscation normalization (red team tuning)
 - [x] Toxic content output filter
+- [x] RBAC: JWT login and token verification
