@@ -37,3 +37,5 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] Model retrain + obfuscation normalization (red team tuning)
 - [x] Toxic content output filter
 - [x] RBAC: JWT login and token verification
+- [x] RBAC roles (admin/employee/guest) with role-based limits
+- [x] Latency audit (per-stage timing report)

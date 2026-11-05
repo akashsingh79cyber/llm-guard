@@ -11,7 +11,6 @@ def load_rules():
 
 
 def user_text(messages):
-    """Saare user messages ka text jodta hai."""
     parts = []
     for m in messages:
         if m.get("role") == "user" and isinstance(m.get("content"), str):
@@ -19,15 +18,16 @@ def user_text(messages):
     return " ".join(parts)
 
 
-def check_prompt(messages, rules=None):
+def check_prompt(messages, rules=None, role="employee"):
     """Rule todne par dict deta hai, sab theek ho to None."""
     rules = rules or load_rules()
     text = user_text(messages)
 
-    if len(text) > rules["max_prompt_length"]:
+    limit = rules.get("role_limits", {}).get(role, rules["max_prompt_length"])
+    if len(text) > limit:
         return {
             "rule": "MAX_LENGTH",
-            "reason": f"Prompt too long ({len(text)} > {rules['max_prompt_length']} chars)",
+            "reason": f"Prompt too long for role '{role}' ({len(text)} > {limit} chars)",
         }
 
     normalized = re.sub(r"\s+", " ", text.lower())
@@ -42,7 +42,6 @@ def check_prompt(messages, rules=None):
 
 
 def enforce_system_prompt(messages, rules=None):
-    """User ke bheje system messages hatao, aur hamara safe system message sabse upar lagao."""
     rules = rules or load_rules()
     cleaned = [m for m in messages if m.get("role") != "system"]
     return [{"role": "system", "content": rules["system_instruction"]}] + cleaned

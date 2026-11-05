@@ -1,6 +1,7 @@
 import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
@@ -8,7 +9,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app import config
 from app.modules import auth, dlp, output_validator, rules, scanner
-from app.modules.logger import log_event
+from app.modules.logger import LOG_FILE, log_event
+
+LATENCY_FILE = Path(__file__).resolve().parent.parent / "logs" / "latency.jsonl"
 
 
 @asynccontextmanager
@@ -18,7 +21,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="LLM-Guard", version="0.7", lifespan=lifespan)
+app = FastAPI(title="LLM-Guard", version="0.8", lifespan=lifespan)
 
 
 def upstream_headers():
@@ -26,6 +29,20 @@ def upstream_headers():
     if config.LLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.LLM_API_KEY}"
     return headers
+
+
+def get_identity(request: Request):
+    h = request.headers.get("Authorization", "")
+    if h.startswith("Bearer "):
+        return auth.verify(h[7:])
+    return None
+
+
+def save_latency(user, role, timings):
+    LATENCY_FILE.parent.mkdir(exist_ok=True)
+    rec = {"user": user, "role": role, **{k: round(v, 2) for k, v in timings.items()}}
+    with open(LATENCY_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
 
 
 @app.get("/health")
@@ -46,6 +63,21 @@ async def auth_login(request: Request):
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
     log_event("LOGIN_OK", username, "AUTH", "Login success")
     return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/admin/logs")
+async def admin_logs(request: Request, n: int = 20):
+    """Sirf admin role dekh sakta hai."""
+    identity = get_identity(request)
+    if identity is None:
+        return JSONResponse(status_code=401, content={"error": "Login required"})
+    if identity["role"] != "admin":
+        log_event("ACCESS_DENIED", identity["user"], "RBAC", "Non-admin tried /admin/logs")
+        return JSONResponse(status_code=403, content={"error": "Admin role required"})
+    if not LOG_FILE.exists():
+        return {"events": []}
+    lines = LOG_FILE.read_text(encoding="utf-8").strip().splitlines()[-n:]
+    return {"events": [json.loads(x) for x in lines]}
 
 
 @app.post("/dlp/test")
@@ -87,10 +119,10 @@ def blocked(rule, reason, user_id, prompt, score=None):
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request):
-    auth_header = request.headers.get("Authorization", "")
-    identity = None
-    if auth_header.startswith("Bearer "):
-        identity = auth.verify(auth_header[7:])
+    t_start = time.perf_counter()
+    timings = {}
+
+    identity = get_identity(request)
     if identity is None:
         log_event("AUTH_FAILED", "unknown", "AUTH", "Missing or invalid token")
         return JSONResponse(
@@ -110,14 +142,18 @@ async def chat(request: Request):
 
     prompt = rules.user_text(body["messages"])
 
-    violation = rules.check_prompt(body["messages"])
+    # 1. Rules (role-based limit)
+    t = time.perf_counter()
+    violation = rules.check_prompt(body["messages"], role=role)
+    timings["rules_ms"] = (time.perf_counter() - t) * 1000
     if violation:
         return blocked(violation["rule"], violation["reason"], user_id, prompt)
 
-    t0 = time.perf_counter()
+    # 2. ML classifier
+    t = time.perf_counter()
     is_attack, score = scanner.scan(prompt)
-    scan_ms = (time.perf_counter() - t0) * 1000
-    print(f"[SCANNER] user={user_id} role={role} score={score:.2f} attack={is_attack} time={scan_ms:.1f}ms")
+    timings["classifier_ms"] = (time.perf_counter() - t) * 1000
+    print(f"[SCANNER] user={user_id} role={role} score={score:.2f} attack={is_attack} time={timings['classifier_ms']:.1f}ms")
     if is_attack:
         return blocked(
             "ML_CLASSIFIER",
@@ -129,7 +165,10 @@ async def chat(request: Request):
 
     body["messages"] = rules.enforce_system_prompt(body["messages"])
 
+    # 3. DLP
+    t = time.perf_counter()
     body["messages"], mapping = dlp.mask_messages(body["messages"])
+    timings["dlp_ms"] = (time.perf_counter() - t) * 1000
     if mapping:
         print(f"[DLP] Masked {len(mapping)} item(s): {list(mapping.keys())}")
         print(f"[DLP] Prompt sent to LLM: {body['messages'][-1]['content']}")
@@ -140,19 +179,30 @@ async def chat(request: Request):
         return stream_response(body)
 
     try:
+        t = time.perf_counter()
         async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT) as client:
             r = await client.post(config.LLM_API_URL, json=body, headers=upstream_headers())
+        timings["llm_ms"] = (time.perf_counter() - t) * 1000
         data = r.json()
 
+        # 4. Output validation
+        t = time.perf_counter()
         if r.status_code == 200:
             sys_inst = rules.load_rules()["system_instruction"]
             data, findings = output_validator.validate_response(data, sys_inst)
             if findings:
                 print(f"[OUTPUT] Redacted/blocked in response: {findings}")
                 log_event("OUTPUT_REDACTED", user_id, "OUTPUT_VALIDATOR", str(findings), None, prompt)
+        timings["output_ms"] = (time.perf_counter() - t) * 1000
 
         if mapping:
             data = json.loads(dlp.unmask_text(json.dumps(data), mapping))
+
+        timings["guard_overhead_ms"] = sum(
+            timings.get(k, 0) for k in ("rules_ms", "classifier_ms", "dlp_ms", "output_ms")
+        )
+        timings["total_ms"] = (time.perf_counter() - t_start) * 1000
+        save_latency(user_id, role, timings)
 
         log_event("ALLOWED", user_id, None, None, score, prompt)
         return JSONResponse(
