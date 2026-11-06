@@ -39,3 +39,4 @@ uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
 - [x] RBAC: JWT login and token verification
 - [x] RBAC roles (admin/employee/guest) with role-based limits
 - [x] Latency audit (per-stage timing report)
+- [x] Security dashboard (Streamlit, cinematic SOC theme)
