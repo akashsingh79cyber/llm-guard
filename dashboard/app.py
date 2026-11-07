@@ -107,6 +107,10 @@ st.markdown(
 )
 
 df = load(LOG)
+import time as _t
+st.sidebar.toggle("Auto-refresh (5s)", value=False, key="auto")
+st.sidebar.caption(f"Last updated: {_t.strftime('%H:%M:%S')}")
+
 if df.empty:
     st.warning("No telemetry yet. Proxy chalao aur red team script run karo.")
     st.stop()
@@ -222,3 +226,8 @@ else:
 with st.expander("📋 Raw blocked events"):
     cols = [x for x in ["timestamp", "user_id", "rule", "score", "reason", "prompt"] if x in bl.columns]
     st.dataframe(bl.sort_values("timestamp", ascending=False)[cols], use_container_width=True)
+
+if st.session_state.get("auto"):
+    _t.sleep(5)
+    st.cache_data.clear()
+    st.rerun()

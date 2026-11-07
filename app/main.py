@@ -176,7 +176,7 @@ async def chat(request: Request):
 
     if body.get("stream"):
         log_event("ALLOWED", user_id, None, "stream", score, prompt)
-        return stream_response(body)
+        return stream_response(body, mapping, user_id, prompt)
 
     try:
         t = time.perf_counter()
@@ -218,16 +218,26 @@ async def chat(request: Request):
         return JSONResponse(status_code=502, content={"error": "LLM returned invalid response"})
 
 
-def stream_response(body):
+def stream_response(body, mapping=None, user_id="anonymous", prompt=""):
+    from app.modules import stream_guard
+
     async def event_generator():
+        all_findings = []
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
                     "POST", config.LLM_API_URL, json=body, headers=upstream_headers()
                 ) as r:
-                    async for chunk in r.aiter_raw():
-                        yield chunk
+                    async for line in r.aiter_lines():
+                        if not line.strip():
+                            yield "\n"
+                            continue
+                        new_line, found = stream_guard.process_sse_line(line, mapping or {})
+                        all_findings.extend(found)
+                        yield new_line + "\n"
         except httpx.RequestError:
-            yield b'data: {"error": "LLM unreachable"}\n\n'
+            yield 'data: {"error": "LLM unreachable"}\n\n'
+        if all_findings:
+            log_event("OUTPUT_REDACTED", user_id, "OUTPUT_VALIDATOR", str(sorted(set(all_findings))), None, prompt)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
