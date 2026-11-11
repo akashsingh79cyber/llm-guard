@@ -1,0 +1,82 @@
+{
+  "passed": 19,
+  "total": 19,
+  "tests": [
+    {
+      "name": "Health endpoint",
+      "ok": true
+    },
+    {
+      "name": "Wrong password rejected",
+      "ok": true
+    },
+    {
+      "name": "No token -> 401",
+      "ok": true
+    },
+    {
+      "name": "Fake token -> 401",
+      "ok": true
+    },
+    {
+      "name": "Safe prompt allowed",
+      "ok": true
+    },
+    {
+      "name": "Tricky safe (git ignore) allowed",
+      "ok": true
+    },
+    {
+      "name": "Keyword attack blocked (Rules)",
+      "ok": true
+    },
+    {
+      "name": "Paraphrased attack blocked (ML)",
+      "ok": true
+    },
+    {
+      "name": "Obfuscated attack blocked",
+      "ok": true
+    },
+    {
+      "name": "DLP: user email returned (unmask)",
+      "ok": true
+    },
+    {
+      "name": "Output: leaked email/card redacted",
+      "ok": true
+    },
+    {
+      "name": "Output: toxic blocked",
+      "ok": true
+    },
+    {
+      "name": "Streaming: unmask works",
+      "ok": true
+    },
+    {
+      "name": "Streaming: leak redacted",
+      "ok": true
+    },
+    {
+      "name": "Guest long prompt blocked (RBAC)",
+      "ok": true
+    },
+    {
+      "name": "Employee same prompt allowed",
+      "ok": true
+    },
+    {
+      "name": "Admin can read logs",
+      "ok": true
+    },
+    {
+      "name": "Employee cannot read logs",
+      "ok": true
+    },
+    {
+      "name": "JSON log file exists",
+      "ok": true
+    }
+  ]
+}
