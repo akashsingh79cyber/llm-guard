@@ -1,0 +1,16 @@
+{
+  "attacks": 118,
+  "blocked": 118,
+  "block_rate_pct": 100.0,
+  "safe": 25,
+  "false_blocks": 1,
+  "false_block_rate_pct": 4.0,
+  "category_rates": {
+    "prompt_leak": 100.0,
+    "authority_claim": 100.0,
+    "roleplay": 100.0,
+    "obfuscated": 100.0,
+    "direct_override": 100.0,
+    "hinglish": 100.0
+  }
+}
