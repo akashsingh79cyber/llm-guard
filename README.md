@@ -1,9 +1,18 @@
 # LLM-Guard: Generative AI Prompt Firewall
 
-Reverse proxy jo LLM ke saamne baith kar prompt injection, jailbreak
-aur data leak rokta hai.
+Reverse proxy jo enterprise LLM ke saamne baith kar prompt injection, jailbreak aur data leakage rokta hai.
 
 ![Architecture](docs/architecture.png)
+
+## Features
+- JWT login aur role-based access (admin / employee / guest)
+- Rules engine (role-based length limit, blocked phrases)
+- ML jailbreak classifier (word + char n-gram SVM) with obfuscation normalization
+- DLP engine: mask and unmask PII (email, card, SSN, Aadhaar, PAN, API key)
+- Output validator: PII leak redaction, toxic filter, system prompt leak block (streaming bhi)
+- JSON telemetry logs (SIEM ready)
+- Streamlit SOC dashboard
+- Red team simulator and system test suite
 
 ## Setup
 ```
@@ -11,34 +20,26 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+`.env.example` ko `.env` me copy karke values bharo.
 
 ## Run
 ```
 uvicorn tests.mock_llm:app --port 9000      # mock LLM
-uvicorn app.main:app --reload --port 8000   # LLM-Guard proxy
+uvicorn app.main:app --port 8000            # LLM-Guard proxy
+streamlit run dashboard/app.py --server.port 8501   # dashboard
 ```
 
-## Status
-- ## Status
-- [x] Project setup, proxy skeleton
-- [x] Reverse proxy forwarding
-- [x] Streaming + error handling
-- [x] DLP engine (mask/unmask)
-- [x] Rules Engine (length limit, keyword block)
-- [x] Safe system instructions
-- [x] Jailbreak classifier, Output Validator, RBAC, Dashboard
-- [x] Jailbreak dataset (collect + clean)
-- [x] Baseline classifier (TF-IDF + LogReg)
-- [x] Better classifier (word + char n-gram SVM) + model comparison
-- [x] Threshold tuning + evaluation report
-- [x] ML classifier integrated in proxy (live jailbreak block)
-- [x] Telemetry logging (JSON, SIEM format)
-- [x] Output validation (PII/secret leak redaction)
-- [x] Model retrain + obfuscation normalization (red team tuning)
-- [x] Toxic content output filter
-- [x] RBAC: JWT login and token verification
-- [x] RBAC roles (admin/employee/guest) with role-based limits
-- [x] Latency audit (per-stage timing report)
-- [x] Security dashboard (Streamlit, cinematic SOC theme)
-- [x] Streaming output validation + unmask
-- [x] Dashboard auto-refresh
+## Test
+```
+python scripts/red_team.py
+python scripts/system_test.py
+python scripts/latency_audit.py
+python scripts/final_metrics.py
+```
+
+## Results
+Red team block rate: [70]% | False block: [50]% | Guard overhead: [50] ms | System tests: [20]/19
+
+## Docs
+- Final report: `report/FINAL_REPORT.md`
+- Daily proof: `docs/Proof_Screenshots`
